@@ -1,5 +1,4 @@
 ---
-
 ---
 
 <html lang="en">
@@ -8,10 +7,776 @@
 		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 		<meta name="viewport" content="width=device-width" />
 		<meta name="generator" content={Astro.generator} />
-		<title>Mona Mayhem</title>
+		<meta
+			name="description"
+			content="Compare GitHub contribution graphs in the Mona Mayhem battle arena."
+		/>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link
+			href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+			rel="stylesheet"
+		/>
+		<title>Mona Mayhem - GitHub Contribution Battle Arena</title>
 	</head>
 	<body>
-		<h1>Mona Mayhem</h1>
-		<p>Welcome to Mona Mayhem! Time to build a GitHub Contribution Battle Arena.</p>
+		<main class="arena">
+			<header class="arena-header">
+				<p class="eyebrow">GitHub contribution battle arena</p>
+				<h1>Mona Mayhem</h1>
+				<p class="intro">Pick two players. Compare their contributions. Let the battle begin.</p>
+			</header>
+
+			<form id="battle-form" class="battle-form" novalidate>
+				<div class="player-input">
+					<label for="player-one">Player 1</label>
+					<div class="input-wrap">
+						<span aria-hidden="true">@</span>
+						<input
+							id="player-one"
+							name="player-one"
+							type="text"
+							autocomplete="username"
+							placeholder="octocat"
+							aria-required="true"
+						/>
+					</div>
+				</div>
+				<span class="form-vs" aria-hidden="true">VS</span>
+				<div class="player-input">
+					<label for="player-two">Player 2</label>
+					<div class="input-wrap">
+						<span aria-hidden="true">@</span>
+						<input
+							id="player-two"
+							name="player-two"
+							type="text"
+							autocomplete="off"
+							placeholder="torvalds"
+							aria-required="true"
+						/>
+					</div>
+				</div>
+				<button id="battle-button" type="submit">Start battle</button>
+			</form>
+
+			<p id="battle-message" class="message" role="status" aria-live="polite"></p>
+
+			<section id="battle-results" class="battle-results" aria-label="Battle results" hidden>
+				<article class="player-result" aria-label="Player 1 results">
+					<div class="result-heading">
+						<h2 id="player-one-name"></h2>
+						<p class="contribution-total"><span id="player-one-total"></span> contributions</p>
+						<p id="player-one-range" class="date-range"></p>
+					</div>
+					<div id="player-one-grid" class="contribution-grid" role="img"></div>
+				</article>
+
+				<div class="results-vs" aria-hidden="true">VS</div>
+
+				<article class="player-result" aria-label="Player 2 results">
+					<div class="result-heading">
+						<h2 id="player-two-name"></h2>
+						<p class="contribution-total"><span id="player-two-total"></span> contributions</p>
+						<p id="player-two-range" class="date-range"></p>
+					</div>
+					<div id="player-two-grid" class="contribution-grid" role="img"></div>
+				</article>
+			</section>
+		</main>
+
+		<script>
+			interface ContributionDay {
+				weekday: number;
+				count: number;
+				level: number;
+			}
+
+			interface ContributionWeek {
+				first_day: string;
+				contribution_days: ContributionDay[];
+			}
+
+			interface ContributionData {
+				from: string;
+				to: string;
+				total_contributions: number;
+				colors_full: string[];
+				weeks: ContributionWeek[];
+			}
+
+			function isRecord(value: unknown): value is Record<string, unknown> {
+				return typeof value === 'object' && value !== null;
+			}
+
+			function isDateString(value: unknown): value is string {
+				if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+					return false;
+				}
+
+				const date = new Date(`${value}T00:00:00Z`);
+				return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+			}
+
+			function isContributionData(value: unknown): value is ContributionData {
+				if (
+					!isRecord(value) ||
+					!isDateString(value.from) ||
+					!isDateString(value.to) ||
+					typeof value.total_contributions !== 'number' ||
+					!Number.isFinite(value.total_contributions) ||
+					value.total_contributions < 0 ||
+					!Array.isArray(value.colors_full) ||
+					value.colors_full.length === 0 ||
+					!value.colors_full.every(
+						(color) => typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color)
+					) ||
+					!Array.isArray(value.weeks)
+				) {
+					return false;
+				}
+
+				return value.weeks.every(
+					(week) =>
+						isRecord(week) &&
+						isDateString(week.first_day) &&
+						Array.isArray(week.contribution_days) &&
+						week.contribution_days.every(
+							(day) =>
+								isRecord(day) &&
+								typeof day.weekday === 'number' &&
+								Number.isInteger(day.weekday) &&
+								day.weekday >= 0 &&
+								day.weekday <= 6 &&
+								typeof day.count === 'number' &&
+								Number.isFinite(day.count) &&
+								day.count >= 0 &&
+								typeof day.level === 'number' &&
+								Number.isInteger(day.level) &&
+								day.level >= 0 &&
+								day.level < value.colors_full.length
+						)
+				);
+			}
+
+			const form = document.getElementById('battle-form');
+			const playerOneInput = document.getElementById('player-one');
+			const playerTwoInput = document.getElementById('player-two');
+			const battleButton = document.getElementById('battle-button');
+			const message = document.getElementById('battle-message');
+			const results = document.getElementById('battle-results');
+
+			if (
+				!(form instanceof HTMLFormElement) ||
+				!(playerOneInput instanceof HTMLInputElement) ||
+				!(playerTwoInput instanceof HTMLInputElement) ||
+				!(battleButton instanceof HTMLButtonElement) ||
+				!(message instanceof HTMLParagraphElement) ||
+				!(results instanceof HTMLElement)
+			) {
+				throw new Error('Battle page is missing a required interface element.');
+			}
+
+			function setMessage(text: string, isError = false, isLoading = false) {
+				message.textContent = text;
+				message.classList.toggle('message-error', isError);
+				message.classList.toggle('message-loading', isLoading);
+				message.setAttribute('role', isError ? 'alert' : 'status');
+			}
+
+			function getApiError(payload: unknown): string | undefined {
+				return isRecord(payload) && typeof payload.error === 'string'
+					? payload.error
+					: undefined;
+			}
+
+			async function fetchContributions(username: string): Promise<ContributionData> {
+				const response = await fetch(`/api/contributions/${encodeURIComponent(username)}`);
+				let payload: unknown;
+
+				try {
+					payload = await response.json();
+				} catch {
+					throw new Error('The contribution service returned an unreadable response.');
+				}
+
+				if (!response.ok) {
+					throw new Error(getApiError(payload) ?? 'Could not load contribution data.');
+				}
+
+				if (!isContributionData(payload)) {
+					throw new Error('The contribution service returned data in an unexpected format.');
+				}
+
+				return payload;
+			}
+
+			function renderPlayer(
+				player: 1 | 2,
+				username: string,
+				data: ContributionData
+			) {
+				// Map the numeric player number to the matching HTML ID token.
+				const playerName = player === 1 ? 'one' : 'two';
+
+				const name = document.getElementById(`player-${playerName}-name`);
+				const total = document.getElementById(`player-${playerName}-total`);
+				const range = document.getElementById(`player-${playerName}-range`);
+				const grid = document.getElementById(`player-${playerName}-grid`);
+
+				if (
+					!(name instanceof HTMLHeadingElement) ||
+					!(total instanceof HTMLSpanElement) ||
+					!(range instanceof HTMLParagraphElement) ||
+					!(grid instanceof HTMLDivElement)
+				) {
+					throw new Error('Battle results are missing a required display element.');
+				}
+
+				name.textContent = `@${username}`;
+				total.textContent = data.total_contributions.toLocaleString();
+				range.textContent = `${data.from} – ${data.to}`;
+				grid.replaceChildren();
+
+				grid.setAttribute(
+					'aria-label',
+					`${username}'s contribution activity from ${data.from} to ${data.to}`
+				);
+
+				for (const week of data.weeks) {
+					const weekColumn = document.createElement('div');
+					weekColumn.className = 'contribution-week';
+
+					for (const day of week.contribution_days) {
+						const square = document.createElement('span');
+						const date = new Date(`${week.first_day}T00:00:00Z`);
+						date.setUTCDate(date.getUTCDate() + day.weekday);
+
+						const dateLabel = date.toISOString().slice(0, 10);
+
+						square.className = 'contribution-day';
+						square.style.backgroundColor = data.colors_full[day.level];
+						square.title = `${dateLabel}: ${day.count} contribution${day.count === 1 ? '' : 's'}`;
+
+						weekColumn.append(square);
+					}
+
+					grid.append(weekColumn);
+				}
+			}
+
+			form.addEventListener('submit', async (event) => {
+				event.preventDefault();
+
+				const usernames = [playerOneInput.value.trim(), playerTwoInput.value.trim()];
+
+				if (usernames.some((username) => username.length === 0)) {
+					results.hidden = true;
+					setMessage('Enter a GitHub username for both players.', true);
+					return;
+				}
+
+				battleButton.disabled = true;
+				battleButton.textContent = 'Loading…';
+				results.hidden = true;
+				setMessage('Fetching contribution data…', false, true);
+
+				try {
+					const [playerOne, playerTwo] = await Promise.all(
+						usernames.map((username) => fetchContributions(username))
+					);
+
+					renderPlayer(1, usernames[0], playerOne);
+					renderPlayer(2, usernames[1], playerTwo);
+
+					results.hidden = false;
+					setMessage('Battle data loaded. Let the comparison begin.');
+				} catch (error) {
+					setMessage(
+						error instanceof Error
+							? error.message
+							: 'Something went wrong while loading the battle.',
+						true
+					);
+				} finally {
+					battleButton.disabled = false;
+					battleButton.textContent = 'Start battle';
+				}
+			});
+		</script>
+
+		<style>
+			:root {
+				--arcade-bg: #0a0a1a;
+				--arcade-surface: #111126;
+				--arcade-surface-raised: #15152d;
+				--arcade-border: #343454;
+				--arcade-green: #5fed83;
+				--arcade-purple: #8a2be2;
+				--arcade-copy: #c6c6d8;
+				font-family: 'Press Start 2P', 'Courier New', monospace;
+				color: #f4f4ff;
+				background: var(--arcade-bg);
+				font-synthesis: none;
+			}
+
+			* {
+				box-sizing: border-box;
+			}
+
+			body {
+				position: relative;
+				min-width: 320px;
+				min-height: 100vh;
+				margin: 0;
+				background:
+					radial-gradient(ellipse at 50% 0%, rgb(138 43 226 / 20%), transparent 52%),
+					radial-gradient(ellipse at 15% 70%, rgb(95 237 131 / 5%), transparent 38%),
+					var(--arcade-bg);
+			}
+
+			body::before {
+				position: fixed;
+				z-index: 10;
+				inset: 0;
+				background: repeating-linear-gradient(
+					to bottom,
+					transparent 0,
+					transparent 3px,
+					rgb(0 0 0 / 24%) 4px,
+					rgb(0 0 0 / 24%) 5px
+				);
+				content: '';
+				pointer-events: none;
+			}
+
+			button,
+			input {
+				font: inherit;
+			}
+
+			.arena {
+				position: relative;
+				z-index: 1;
+				width: min(100% - 2rem, 1080px);
+				margin: 0 auto;
+				padding: 4rem 0;
+			}
+
+			.arena-header {
+				margin-bottom: 2.5rem;
+				text-align: center;
+			}
+
+			.eyebrow {
+				margin: 0 0 0.75rem;
+				color: var(--arcade-green);
+				font-size: 0.55rem;
+				font-weight: 700;
+				line-height: 1.8;
+				text-transform: uppercase;
+			}
+
+			h1,
+			h2,
+			p {
+				margin-top: 0;
+			}
+
+			h1 {
+				margin-bottom: 0.75rem;
+				color: #fff;
+				font-size: clamp(1.4rem, 5vw, 2.4rem);
+				line-height: 1.7;
+				text-shadow:
+					0 0 5px #fff,
+					0 0 12px var(--arcade-purple),
+					0 0 26px var(--arcade-purple);
+				animation:
+					neon-pulse 2.8s ease-in-out infinite alternate,
+					electrical-flicker 7s linear infinite;
+			}
+
+			.intro {
+				margin-bottom: 0;
+				color: var(--arcade-copy);
+				font-family: Arial, sans-serif;
+				font-size: 1rem;
+				line-height: 1.6;
+			}
+
+			.battle-form {
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+				align-items: end;
+				gap: 1rem;
+				padding: 1.5rem;
+				border: 1px solid var(--arcade-border);
+				border-radius: 12px;
+				background: rgb(17 17 38 / 92%);
+				box-shadow:
+					0 16px 48px rgb(0 0 0 / 32%),
+					0 0 22px rgb(138 43 226 / 8%);
+			}
+
+			.player-input {
+				animation: float-in 650ms cubic-bezier(0.2, 0.75, 0.25, 1) both;
+			}
+
+			.player-input:nth-of-type(2) {
+				animation-delay: 140ms;
+			}
+
+			.player-input label {
+				display: block;
+				margin-bottom: 0.55rem;
+				color: var(--arcade-green);
+				font-size: 0.55rem;
+				line-height: 1.8;
+				font-weight: 700;
+			}
+
+			.input-wrap {
+				display: flex;
+				align-items: center;
+				gap: 0.5rem;
+				padding: 0 0.8rem;
+				border: 1px solid #48486a;
+				border-radius: 7px;
+				background: var(--arcade-bg);
+				color: var(--arcade-purple);
+			}
+
+			.input-wrap:focus-within {
+				border-color: var(--arcade-green);
+				outline: 2px solid rgb(95 237 131 / 25%);
+				box-shadow: 0 0 16px rgb(95 237 131 / 18%);
+			}
+
+			input {
+				width: 100%;
+				min-width: 0;
+				padding: 0.8rem 0;
+				border: 0;
+				outline: 0;
+				background: transparent;
+				color: #fff;
+				font-family: 'Courier New', monospace;
+				font-size: 1rem;
+			}
+
+			input::placeholder {
+				color: #77778f;
+			}
+
+			.form-vs,
+			.results-vs {
+				display: grid;
+				width: 2.6rem;
+				height: 2.6rem;
+				place-items: center;
+				border: 1px solid var(--arcade-purple);
+				border-radius: 50%;
+				background: linear-gradient(135deg, var(--arcade-green), var(--arcade-purple), var(--arcade-green));
+				background-size: 220% 220%;
+				color: var(--arcade-bg);
+				font-size: 0.55rem;
+				font-weight: 900;
+				box-shadow: 0 0 15px rgb(138 43 226 / 28%);
+				animation:
+					badge-gradient 3s ease-in-out infinite,
+					badge-pulse 1.8s ease-in-out infinite;
+			}
+
+			button {
+				grid-column: 1 / -1;
+				min-height: 3rem;
+				border: 0;
+				border-radius: 7px;
+				background: linear-gradient(100deg, var(--arcade-purple), #6720b0);
+				color: #fff;
+				font-family: inherit;
+				font-size: 0.7rem;
+				line-height: 1.8;
+				font-weight: 800;
+				cursor: pointer;
+				transition: background-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+			}
+
+			button:hover:not(:disabled) {
+				transform: translateY(-1px);
+				background: linear-gradient(100deg, #9d49ef, var(--arcade-purple));
+				box-shadow: 0 0 20px rgb(138 43 226 / 45%);
+			}
+
+			button:focus-visible {
+				outline: 3px solid var(--arcade-green);
+				outline-offset: 3px;
+			}
+
+			button:disabled {
+				cursor: wait;
+				opacity: 0.7;
+			}
+
+			.message {
+				min-height: 1.5rem;
+				margin: 1rem 0;
+				color: var(--arcade-green);
+				font-family: Arial, sans-serif;
+				text-align: center;
+			}
+
+			.message-loading {
+				font-family: 'Press Start 2P', 'Courier New', monospace;
+				font-size: 0.55rem;
+				line-height: 1.8;
+				animation: loading-shift 1.4s ease-in-out infinite alternate;
+			}
+
+			.message-error {
+				color: #fca5a5;
+			}
+
+			.battle-results {
+				display: grid;
+				grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+				align-items: center;
+				gap: 1rem;
+			}
+
+			.battle-results[hidden] {
+				display: none;
+			}
+
+			.player-result {
+				position: relative;
+				min-width: 0;
+				padding: 1.25rem;
+				overflow: hidden;
+				border: 1px solid var(--arcade-border);
+				border-radius: 10px;
+				background: var(--arcade-surface);
+				box-shadow: 0 0 18px rgb(138 43 226 / 8%);
+			}
+
+			.player-result::after {
+				position: absolute;
+				z-index: 2;
+				inset: 0;
+				border-radius: inherit;
+				background: linear-gradient(
+					110deg,
+					transparent 25%,
+					rgb(95 237 131 / 8%) 42%,
+					rgb(255 255 255 / 12%) 50%,
+					rgb(138 43 226 / 10%) 58%,
+					transparent 75%
+				);
+				background-size: 240% 100%;
+				content: '';
+				pointer-events: none;
+				animation: card-shimmer 6s ease-in-out infinite;
+			}
+
+			.player-result > * {
+				position: relative;
+				z-index: 1;
+			}
+
+			.result-heading {
+				margin-bottom: 1rem;
+			}
+
+			.result-heading h2 {
+				margin-bottom: 0.5rem;
+				overflow-wrap: anywhere;
+				color: var(--arcade-green);
+				font-size: 0.7rem;
+				line-height: 1.8;
+			}
+
+			.contribution-total {
+				margin-bottom: 0.25rem;
+				color: #fff;
+				font-family: Arial, sans-serif;
+				font-size: 1.1rem;
+				font-weight: 800;
+			}
+
+			.date-range {
+				margin-bottom: 0;
+				color: #a6a6bf;
+				font-family: Arial, sans-serif;
+				font-size: 0.8rem;
+			}
+
+			.contribution-grid {
+				display: flex;
+				gap: 3px;
+				overflow-x: auto;
+				padding: 0.2rem 0 0.5rem;
+			}
+
+			.contribution-week {
+				display: grid;
+				flex: 0 0 auto;
+				grid-template-rows: repeat(7, 10px);
+				gap: 3px;
+			}
+
+			.contribution-day {
+				width: 10px;
+				height: 10px;
+				border-radius: 2px;
+				transition: box-shadow 120ms ease, transform 120ms ease;
+			}
+
+			.contribution-day:hover {
+				position: relative;
+				z-index: 1;
+				transform: scale(1.45);
+				box-shadow:
+					0 0 5px var(--arcade-green),
+					0 0 12px var(--arcade-purple);
+			}
+
+			@keyframes neon-pulse {
+				from {
+					text-shadow:
+						0 0 4px #fff,
+						0 0 9px var(--arcade-purple),
+						0 0 18px var(--arcade-purple);
+				}
+				to {
+					text-shadow:
+						0 0 7px #fff,
+						0 0 16px var(--arcade-purple),
+						0 0 34px var(--arcade-purple),
+						0 0 48px rgb(138 43 226 / 55%);
+				}
+			}
+
+			@keyframes electrical-flicker {
+				0%,
+				19%,
+				21%,
+				23%,
+				80%,
+				82%,
+				100% {
+					opacity: 1;
+				}
+				20%,
+				81% {
+					opacity: 0.82;
+				}
+				22% {
+					opacity: 0.94;
+				}
+			}
+
+			@keyframes badge-gradient {
+				0%,
+				100% {
+					background-position: 0% 50%;
+					box-shadow: 0 0 12px rgb(95 237 131 / 25%);
+				}
+				50% {
+					background-position: 100% 50%;
+					box-shadow: 0 0 18px rgb(138 43 226 / 45%);
+				}
+			}
+
+			@keyframes badge-pulse {
+				0%,
+				100% {
+					transform: scale(1);
+					box-shadow:
+						0 0 12px rgb(95 237 131 / 45%),
+						0 0 24px rgb(138 43 226 / 35%);
+				}
+				50% {
+					transform: scale(1.18);
+					box-shadow:
+						0 0 20px rgb(95 237 131 / 85%),
+						0 0 42px rgb(138 43 226 / 75%);
+				}
+			}
+
+			@keyframes card-shimmer {
+				0%,
+				25% {
+					background-position: 120% 0;
+				}
+				65%,
+				100% {
+					background-position: -140% 0;
+				}
+			}
+
+			@keyframes float-in {
+				from {
+					transform: translateY(14px);
+					opacity: 0;
+				}
+				to {
+					transform: translateY(0);
+					opacity: 1;
+				}
+			}
+
+			@keyframes loading-shift {
+				from {
+					color: var(--arcade-green);
+					text-shadow: 0 0 8px rgb(95 237 131 / 45%);
+				}
+				to {
+					color: #b77bf1;
+					text-shadow: 0 0 8px rgb(138 43 226 / 55%);
+				}
+			}
+
+			@media (prefers-reduced-motion: reduce) {
+				*,
+				*::before,
+				*::after {
+					scroll-behavior: auto !important;
+					animation-duration: 0.01ms !important;
+					animation-iteration-count: 1 !important;
+					transition-duration: 0.01ms !important;
+				}
+			}
+
+			@media (max-width: 720px) {
+				.arena {
+					padding: 2.5rem 0;
+				}
+
+				.battle-form {
+					grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+					gap: 0.75rem;
+					padding: 1rem;
+				}
+
+				.battle-results {
+					grid-template-columns: minmax(0, 1fr);
+				}
+
+				.results-vs {
+					margin: -0.25rem auto;
+				}
+			}
+
+			@media (max-width: 420px) {
+				.battle-form {
+					grid-template-columns: 1fr;
+				}
+
+				.form-vs {
+					margin: -0.25rem auto;
+				}
+			}
+		</style>
 	</body>
 </html>

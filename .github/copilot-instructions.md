@@ -42,6 +42,13 @@ For validation in this repo, prefer manual browser verification against the loca
 - Prefer the simple Astro page/API structure over introducing additional libraries or build tooling unless a workshop step explicitly calls for it.
 - The app is intentionally lightweight: the battle experience is implemented with Astro pages, a small fetch boundary, and browser-side rendering.
 
+## Retro arcade visual guide
+
+- Keep the live app's dark arcade background (`#0a0a1a`) with neon green (`#5fed83`) and purple (`#8a2be2`) as its primary accent colors.
+- Use Press Start 2P from Google Fonts for arcade headings and controls, with readable fallback/system fonts for longer copy and contribution details.
+- New UI should maintain the neon arcade aesthetic: dark surfaces, glowing accent details, and restrained pixel-game styling rather than neutral or default component themes.
+- Use short, purposeful motion such as neon flicker/pulse, gradient shifts, shimmer, and hover glows. Respect `prefers-reduced-motion` for decorative animation.
+
 ## Conventions specific to this repository
 
 - Use `src/pages` for routes and page-level logic; keep server endpoints in `src/pages/api/...` when implementing API-backed features.
