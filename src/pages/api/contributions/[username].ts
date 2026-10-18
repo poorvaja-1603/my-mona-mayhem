@@ -24,7 +24,7 @@ export const GET: APIRoute = async ({ params }) => {
 	if (
 		!username ||
 		username.length > 39 ||
-		!/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(username)
+		!/^(?!.*--)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(username)
 	) {
 		return jsonResponse({ error: 'Invalid GitHub username' }, 400);
 	}

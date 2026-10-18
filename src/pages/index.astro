@@ -39,8 +39,11 @@
 							autocomplete="username"
 							placeholder="octocat"
 							aria-required="true"
+							aria-describedby="player-one-error"
+							aria-invalid="false"
 						/>
 					</div>
+					<p id="player-one-error" class="field-error" hidden></p>
 				</div>
 				<span class="form-vs" aria-hidden="true">VS</span>
 				<div class="player-input">
@@ -54,8 +57,11 @@
 							autocomplete="off"
 							placeholder="torvalds"
 							aria-required="true"
+							aria-describedby="player-two-error"
+							aria-invalid="false"
 						/>
 					</div>
+					<p id="player-two-error" class="field-error" hidden></p>
 				</div>
 				<button id="battle-button" type="submit">Start battle</button>
 			</form>
@@ -162,6 +168,8 @@
 			const form = document.getElementById('battle-form');
 			const playerOneInput = document.getElementById('player-one');
 			const playerTwoInput = document.getElementById('player-two');
+			const playerOneError = document.getElementById('player-one-error');
+			const playerTwoError = document.getElementById('player-two-error');
 			const battleButton = document.getElementById('battle-button');
 			const message = document.getElementById('battle-message');
 			const results = document.getElementById('battle-results');
@@ -170,11 +178,44 @@
 				!(form instanceof HTMLFormElement) ||
 				!(playerOneInput instanceof HTMLInputElement) ||
 				!(playerTwoInput instanceof HTMLInputElement) ||
+				!(playerOneError instanceof HTMLParagraphElement) ||
+				!(playerTwoError instanceof HTMLParagraphElement) ||
 				!(battleButton instanceof HTMLButtonElement) ||
 				!(message instanceof HTMLParagraphElement) ||
 				!(results instanceof HTMLElement)
 			) {
 				throw new Error('Battle page is missing a required interface element.');
+			}
+
+			function validateUsername(username: string, player: 1 | 2): string | undefined {
+				if (!username) {
+					return `Enter Player ${player}'s GitHub username.`;
+				}
+
+				if (
+					username.length > 39 ||
+					!/^(?!.*--)[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(username)
+				) {
+					return 'Use 1–39 letters, numbers, or single hyphens; start and end with a letter or number.';
+				}
+
+				return undefined;
+			}
+
+			function setFieldError(
+				input: HTMLInputElement,
+				errorElement: HTMLParagraphElement,
+				error: string | undefined
+			) {
+				const field = input.closest('.player-input');
+				if (!(field instanceof HTMLDivElement)) {
+					return;
+				}
+
+				input.setAttribute('aria-invalid', String(Boolean(error)));
+				field.classList.toggle('is-invalid', Boolean(error));
+				errorElement.textContent = error ?? '';
+				errorElement.hidden = !error;
 			}
 
 			function setMessage(text: string, isError = false, isLoading = false) {
@@ -269,10 +310,15 @@
 				event.preventDefault();
 
 				const usernames = [playerOneInput.value.trim(), playerTwoInput.value.trim()];
+				const playerOneValidation = validateUsername(usernames[0], 1);
+				const playerTwoValidation = validateUsername(usernames[1], 2);
 
-				if (usernames.some((username) => username.length === 0)) {
+				setFieldError(playerOneInput, playerOneError, playerOneValidation);
+				setFieldError(playerTwoInput, playerTwoError, playerTwoValidation);
+
+				if (playerOneValidation || playerTwoValidation) {
 					results.hidden = true;
-					setMessage('Enter a GitHub username for both players.', true);
+					setMessage('Fix the highlighted player fields before starting the battle.', true);
 					return;
 				}
 
@@ -447,10 +493,27 @@
 				color: var(--arcade-purple);
 			}
 
+			.player-input.is-invalid .input-wrap {
+				border-color: #ff5c8a;
+				box-shadow:
+					0 0 8px rgb(255 92 138 / 45%),
+					0 0 18px rgb(255 92 138 / 22%);
+			}
+
 			.input-wrap:focus-within {
 				border-color: var(--arcade-green);
-				outline: 2px solid rgb(95 237 131 / 25%);
+				outline: 3px solid var(--arcade-green);
+				outline-offset: 3px;
 				box-shadow: 0 0 16px rgb(95 237 131 / 18%);
+			}
+
+			.field-error {
+				margin: 0.45rem 0 0;
+				color: #ff8eaa;
+				font-family: Arial, sans-serif;
+				font-size: 0.8rem;
+				line-height: 1.4;
+				text-shadow: 0 0 8px rgb(255 92 138 / 55%);
 			}
 
 			input {
@@ -748,17 +811,7 @@
 				}
 			}
 
-			@media (max-width: 720px) {
-				.arena {
-					padding: 2.5rem 0;
-				}
-
-				.battle-form {
-					grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-					gap: 0.75rem;
-					padding: 1rem;
-				}
-
+			@media (max-width: 1024px) {
 				.battle-results {
 					grid-template-columns: minmax(0, 1fr);
 				}
@@ -768,9 +821,15 @@
 				}
 			}
 
-			@media (max-width: 420px) {
+			@media (max-width: 720px) {
+				.arena {
+					padding: 2.5rem 0;
+				}
+
 				.battle-form {
 					grid-template-columns: 1fr;
+					gap: 0.75rem;
+					padding: 1rem;
 				}
 
 				.form-vs {
